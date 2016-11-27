@@ -6,12 +6,14 @@ import pydub
 import sys
 import spotipy
 import spotipy.util as util
+import urllib
 
 def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName):
     for index, item in enumerate(tracks['items']):
         track = item['track']
         artist = track['artists'][0]['name']
         title = track['name']
+        pictureURL = track['album']['images'][0]['url']
         print "Processing: %s %s" % (artist, title)
         endPosition = currentStartPosition + track['duration_ms']
         if endPosition > totalLength:
@@ -23,13 +25,17 @@ def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlis
         if currentStartPosition < totalLength:
             print "Exporting from %d:%d to %d:%d" % (startM, startS, endM, endS)
             currentAudio = rippedFile[currentStartPosition:endPosition]
-            currentAudio.export("%s - %s.mp3" % (artist, title), format="mp3")
+            trackPath = "%s - %s.mp3" % (artist, title)
+            picPath = "pic%d.jpeg" % (index)
+            currentAudio.export(trackPath, format="mp3")
             currentStartPosition = endPosition
+            urllib.urlretrieve(pictureURL, picPath)
+            writeTags(trackPath, unicode(artist), unicode(title), unicode(playlistName), picPath)
         else:
             print "Ignoring from %d:%d to %d:%d" % (startM, startS, endM, endS)
 
 
-def writeTags(filePath, artist, title, album):
+def writeTags(filePath, artist, title, album, imagePath):
     audioFile = eyed3.load(filePath)
     if audioFile.tag is None:
         audioFile.initTag()
@@ -37,10 +43,9 @@ def writeTags(filePath, artist, title, album):
     audioFile.tag.artist = artist
     audioFile.tag.title = title
     audioFile.tag.album = album
-    # audioFile.tag.genre = genre
-    #
-    # image = open(imagePath,"rb").read()
-    # audioFile.tag.images.set(3, image, "image/png", u"cover")
+
+    image = open(imagePath,"rb").read()
+    audioFile.tag.images.set(3, image, "image/jpeg", u"cover")
 
     audioFile.tag.save()
 
