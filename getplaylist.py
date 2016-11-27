@@ -33,7 +33,7 @@ def writeTags(filePath, artist, title, album, genre, imagePath):
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        username = sys.argv[1]
+        userName = sys.argv[1]
         playlistName = sys.argv[2]
         rippedFilePath = sys.argv[3]
     else:
@@ -49,17 +49,17 @@ if __name__ == '__main__':
     # currentEnd = 0
 
     # Init spotify data, exit if it fails
-    token = util.prompt_for_user_token(username)
+    token = util.prompt_for_user_token(userName)
     if not token:
-        print "Can't get token for", username
+        print "Can't get token for", userName
         exit()
 
     sp = spotipy.Spotify(auth=token)
-    playlists = sp.user_playlists(username)
+    playlists = sp.user_playlists(userName)
     for playlist in playlists['items']:
-        if (playlist['owner']['id'] == username and
+        if (playlist['owner']['id'] == userName and
             playlist['name'] == playlistName):
-            results = sp.user_playlist(username, playlist['id'],fields="tracks,next")
+            results = sp.user_playlist(userName, playlist['id'],fields="tracks,next")
             tracks = results['tracks']
             show_tracks(tracks)
             while tracks['next']:
