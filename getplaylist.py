@@ -2,6 +2,7 @@
 # shows a user's playlists (need to be authenticated via oauth)
 
 import eyed3
+import os
 import pydub
 import sys
 import spotipy
@@ -14,26 +15,24 @@ def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlis
         artist = track['artists'][0]['name']
         title = track['name']
         pictureURL = track['album']['images'][0]['url']
-        print "Processing: %s %s" % (artist, title)
+        trackPath = "%s - %s.mp3" % (artist, title)
+        picPath = "pic%d.jpeg" % (index)
         endPosition = currentStartPosition + track['duration_ms']
         if endPosition > totalLength:
             endPosition = totalLength
+            trackPath = "(INCOMPLETE) %s - %s.mp3" % (artist, title)
 
         startM, startS = divmod(currentStartPosition/1000., 60)
         endM, endS = divmod(endPosition/1000., 60)
 
         if currentStartPosition < totalLength:
-            print "Exporting from %d:%d to %d:%d" % (startM, startS, endM, endS)
+            print "(%d:%d->%d:%d) %s - %s" % (startM, startS, endM, endS, artist, title)
             currentAudio = rippedFile[currentStartPosition:endPosition]
-            trackPath = "%s - %s.mp3" % (artist, title)
-            picPath = "pic%d.jpeg" % (index)
             currentAudio.export(trackPath, format="mp3")
             currentStartPosition = endPosition
             urllib.urlretrieve(pictureURL, picPath)
             writeTags(trackPath, unicode(artist), unicode(title), unicode(playlistName), picPath)
-        else:
-            print "Ignoring from %d:%d to %d:%d" % (startM, startS, endM, endS)
-
+            os.remove(picPath)
 
 def writeTags(filePath, artist, title, album, imagePath):
     audioFile = eyed3.load(filePath)
