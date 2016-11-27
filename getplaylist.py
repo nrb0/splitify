@@ -8,8 +8,10 @@ import spotipy.util as util
 def show_tracks(tracks):
     for i, item in enumerate(tracks['items']):
         track = item['track']
-        print "   %d %32.32s %s" % (i, track['artists'][0]['name'],
-            track['name'])
+        duration_ms = track['duration_ms']
+        duration_seconds = duration_ms / 1000.
+        minutes, seconds = divmod(duration_seconds, 60)
+        print "* %d %s %s %d:%d" % (i, track['artists'][0]['name'], track['name'], minutes, seconds)
 
 
 if __name__ == '__main__':
@@ -27,11 +29,8 @@ if __name__ == '__main__':
         playlists = sp.user_playlists(username)
         for playlist in playlists['items']:
             if playlist['owner']['id'] == username:
-                print
                 print playlist['name']
-                print '  total tracks', playlist['tracks']['total']
-                results = sp.user_playlist(username, playlist['id'],
-                    fields="tracks,next")
+                results = sp.user_playlist(username, playlist['id'],fields="tracks,next")
                 tracks = results['tracks']
                 show_tracks(tracks)
                 while tracks['next']:
