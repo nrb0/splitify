@@ -13,7 +13,7 @@ def show_tracks(tracks):
         duration_ms = track['duration_ms']
         duration_seconds = duration_ms / 1000.
         minutes, seconds = divmod(duration_seconds, 60)
-        #print "* %d %s %s %d:%d" % (i, track['artists'][0]['name'], track['name'], minutes, seconds)
+        print "* %d %s %s %d:%d" % (i, track['artists'][0]['name'], track['name'], minutes, seconds)
 
 def writeTags(filePath, artist, title, album, genre, imagePath):
     audioFile = eyed3.load(filePath)
@@ -34,31 +34,34 @@ def writeTags(filePath, artist, title, album, genre, imagePath):
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         username = sys.argv[1]
-        wav_filepath = sys.argv[2]
+        playlistName = sys.argv[2]
+        rippedFilePath = sys.argv[3]
     else:
         #print "Whoops, need your username!"
         #print "usage: python user_playlists.py [username]"
         sys.exit()
 
-    wav_file = pydub.AudioSegment.from_mp3(wav_filepath)
-    first_10_seconds = wav_file[:10000]
-    first_10_seconds.export("something.mp3", format="mp3")
-    writeTags("something.mp3", u"artist", u"title", u"album", u"genre", "pic.png")
+    # Start by getting the ripped file and preparing some data for iterating
+    # rippedFile = pydub.AudioSegment.from_mp3(rippedFilePath)
+    # totalLength = len(rippedFile)
+    # print "Audio file duration is %d:%d" % divmod(totalLength / 1000., 60)
+    # currentStart = 0
+    # currentEnd = 0
 
-    # token = util.prompt_for_user_token(username)
-    #
-    #
-    # if token:
-    #     sp = spotipy.Spotify(auth=token)
-    #     playlists = sp.user_playlists(username)
-    #     for playlist in playlists['items']:
-    #         if playlist['owner']['id'] == username:
-    #             print playlist['name']
-    #             results = sp.user_playlist(username, playlist['id'],fields="tracks,next")
-    #             tracks = results['tracks']
-    #             show_tracks(tracks)
-    #             while tracks['next']:
-    #                 tracks = sp.next(tracks)
-    #                 show_tracks(tracks)
-    # else:
-    #     print "Can't get token for", username
+    # Init spotify data, exit if it fails
+    token = util.prompt_for_user_token(username)
+    if not token:
+        print "Can't get token for", username
+        exit()
+
+    sp = spotipy.Spotify(auth=token)
+    playlists = sp.user_playlists(username)
+    for playlist in playlists['items']:
+        if (playlist['owner']['id'] == username and
+            playlist['name'] == playlistName):
+            results = sp.user_playlist(username, playlist['id'],fields="tracks,next")
+            tracks = results['tracks']
+            show_tracks(tracks)
+            while tracks['next']:
+                tracks = sp.next(tracks)
+                show_tracks(tracks)
