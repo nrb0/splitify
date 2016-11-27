@@ -7,15 +7,29 @@ import sys
 import spotipy
 import spotipy.util as util
 
-def show_tracks(tracks):
-    for i, item in enumerate(tracks['items']):
+def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName):
+    for index, item in enumerate(tracks['items']):
         track = item['track']
-        duration_ms = track['duration_ms']
-        duration_seconds = duration_ms / 1000.
-        minutes, seconds = divmod(duration_seconds, 60)
-        print "* %d %s %s %d:%d" % (i, track['artists'][0]['name'], track['name'], minutes, seconds)
+        artist = track['artists'][0]['name']
+        title = track['name']
+        print "Processing: %s %s" % (artist, title)
+        endPosition = currentStartPosition + track['duration_ms']
+        if endPosition > totalLength:
+            endPosition = totalLength
 
-def writeTags(filePath, artist, title, album, genre, imagePath):
+        startM, startS = divmod(currentStartPosition/1000., 60)
+        endM, endS = divmod(endPosition/1000., 60)
+
+        if currentStartPosition < totalLength:
+            print "Exporting from %d:%d to %d:%d" % (startM, startS, endM, endS)
+            currentAudio = rippedFile[currentStartPosition:endPosition]
+            currentAudio.export("%s - %s.mp3" % (artist, title), format="mp3")
+            currentStartPosition = endPosition
+        else:
+            print "Ignoring from %d:%d to %d:%d" % (startM, startS, endM, endS)
+
+
+def writeTags(filePath, artist, title, album):
     audioFile = eyed3.load(filePath)
     if audioFile.tag is None:
         audioFile.initTag()
@@ -23,10 +37,10 @@ def writeTags(filePath, artist, title, album, genre, imagePath):
     audioFile.tag.artist = artist
     audioFile.tag.title = title
     audioFile.tag.album = album
-    audioFile.tag.genre = genre
-
-    image = open(imagePath,"rb").read()
-    audioFile.tag.images.set(3, image, "image/png", u"cover")
+    # audioFile.tag.genre = genre
+    #
+    # image = open(imagePath,"rb").read()
+    # audioFile.tag.images.set(3, image, "image/png", u"cover")
 
     audioFile.tag.save()
 
@@ -42,11 +56,10 @@ if __name__ == '__main__':
         sys.exit()
 
     # Start by getting the ripped file and preparing some data for iterating
-    # rippedFile = pydub.AudioSegment.from_mp3(rippedFilePath)
-    # totalLength = len(rippedFile)
-    # print "Audio file duration is %d:%d" % divmod(totalLength / 1000., 60)
-    # currentStart = 0
-    # currentEnd = 0
+    rippedFile = pydub.AudioSegment.from_mp3(rippedFilePath)
+    totalLength = len(rippedFile)
+    print "Audio file duration is %d:%d" % divmod(totalLength / 1000., 60)
+    currentStartPosition = 0
 
     # Init spotify data, exit if it fails
     token = util.prompt_for_user_token(userName)
@@ -59,9 +72,9 @@ if __name__ == '__main__':
     for playlist in playlists['items']:
         if (playlist['owner']['id'] == userName and
             playlist['name'] == playlistName):
-            results = sp.user_playlist(userName, playlist['id'],fields="tracks,next")
+            results = sp.user_playlist(userName, playlist['id'],fields="tracks, next")
             tracks = results['tracks']
-            show_tracks(tracks)
+            processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName)
             while tracks['next']:
                 tracks = sp.next(tracks)
-                show_tracks(tracks)
+                processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName)
