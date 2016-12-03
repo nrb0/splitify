@@ -13,6 +13,16 @@ def removeIllegalCharacters(name):
     remove_punctuation_map = dict((ord(char), None) for char in '\/*?:"<>|')
     return name.translate(remove_punctuation_map)
 
+def getNextSilentPosition(rippedFile, position, windowSize=300, threshold=-16):
+    lastAvailablePosition = len(rippedFile) - windowSize
+    for index in range(position, lastAvailablePosition):
+        audioSlice = rippedFile[index:index + windowSize]
+        currentRMS = audioSlice.rms
+        if currentRMS == 0:
+            return index + windowSize
+
+    return position
+
 def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName):
     for index, item in enumerate(tracks['items']):
         track = item['track']
@@ -21,7 +31,8 @@ def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlis
         pictureURL = track['album']['images'][0]['url']
         trackPath = " %02d %s - %s.mp3" % (index+1, removeIllegalCharacters(artist), removeIllegalCharacters(title))
         picPath = "pic%d.jpeg" % (index)
-        endPosition = currentStartPosition + track['duration_ms'] + 450
+        print "Preparing : %s - %s" % (artist, title)
+        endPosition = getNextSilentPosition(rippedFile, currentStartPosition + track['duration_ms'])
         if endPosition > totalLength:
             endPosition = totalLength
             trackPath = "(INCOMPLETE)" + trackPath
@@ -30,10 +41,10 @@ def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlis
         endM, endS = divmod(endPosition/1000., 60)
 
         if currentStartPosition < totalLength:
-            print "(%d:%d->%d:%d) %s - %s" % (startM, startS, endM, endS, artist, title)
+            print "(%d:%d->%d:%d) exporting ..." % (startM, startS, endM, endS)
             currentAudio = rippedFile[currentStartPosition:endPosition]
             currentAudio.export(trackPath, format="mp3")
-            currentStartPosition = endPosition
+            currentStartPosition = endPosition + 1
             urllib.urlretrieve(pictureURL, picPath)
             writeTags(trackPath, unicode(artist), unicode(title), unicode(playlistName), picPath)
             os.remove(picPath)
