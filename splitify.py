@@ -1,5 +1,4 @@
 #!/usr/local/bin/python
-# shows a user's playlists (need to be authenticated via oauth)
 
 import eyed3
 import os
@@ -20,7 +19,6 @@ def getNextSilentPosition(rippedFile, position, windowSize=300, threshold=-16):
         currentRMS = audioSlice.rms
         if currentRMS == 0:
             return index + windowSize
-
     return position
 
 def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName):
@@ -36,10 +34,8 @@ def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlis
         if endPosition > totalLength:
             endPosition = totalLength
             trackPath = "(INCOMPLETE)" + trackPath
-
         startM, startS = divmod(currentStartPosition/1000., 60)
         endM, endS = divmod(endPosition/1000., 60)
-
         if currentStartPosition < totalLength:
             print "(%d:%d->%d:%d) exporting ..." % (startM, startS, endM, endS)
             currentAudio = rippedFile[currentStartPosition:endPosition]
@@ -57,10 +53,8 @@ def writeTags(filePath, artist, title, album, imagePath):
     audioFile.tag.artist = artist
     audioFile.tag.title = title
     audioFile.tag.album = album
-
     image = open(imagePath,"rb").read()
     audioFile.tag.images.set(3, image, "image/jpeg", u"cover")
-
     audioFile.tag.save()
 
 
@@ -70,22 +64,18 @@ if __name__ == '__main__':
         playlistName = sys.argv[2]
         rippedFilePath = sys.argv[3]
     else:
-        #print "Whoops, need your username!"
-        #print "usage: python user_playlists.py [username]"
+        #print "usage: user_playlists.py [username] [spotifyPlaylistName] [path/to/ripped/mp3]"
         sys.exit()
-
     # Start by getting the ripped file and preparing some data for iterating
     rippedFile = pydub.AudioSegment.from_mp3(rippedFilePath)
     totalLength = len(rippedFile)
     print "Audio file duration is %d:%d" % divmod(totalLength / 1000., 60)
     currentStartPosition = 0
-
     # Init spotify data, exit if it fails
     token = util.prompt_for_user_token(userName)
     if not token:
         print "Can't get token for", userName
         exit()
-
     sp = spotipy.Spotify(auth=token)
     playlists = sp.user_playlists(userName)
     for playlist in playlists['items']:
