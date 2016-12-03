@@ -9,18 +9,22 @@ import spotipy
 import spotipy.util as util
 import urllib
 
+def removeIllegalCharacters(name):
+    remove_punctuation_map = dict((ord(char), None) for char in '\/*?:"<>|')
+    return name.translate(remove_punctuation_map)
+
 def processTracks(tracks, rippedFile, totalLength, currentStartPosition, playlistName):
     for index, item in enumerate(tracks['items']):
         track = item['track']
         artist = track['artists'][0]['name']
         title = track['name']
         pictureURL = track['album']['images'][0]['url']
-        trackPath = "%s - %s.mp3" % (artist, title)
+        trackPath = " %02d %s - %s.mp3" % (index+1, removeIllegalCharacters(artist), removeIllegalCharacters(title))
         picPath = "pic%d.jpeg" % (index)
-        endPosition = currentStartPosition + track['duration_ms']
+        endPosition = currentStartPosition + track['duration_ms'] + 450
         if endPosition > totalLength:
             endPosition = totalLength
-            trackPath = "(INCOMPLETE) %s - %s.mp3" % (artist, title)
+            trackPath = "(INCOMPLETE)" + trackPath
 
         startM, startS = divmod(currentStartPosition/1000., 60)
         endM, endS = divmod(endPosition/1000., 60)
