@@ -68,7 +68,7 @@ def format_ms_time(duration_ms, with_ms=False):
         return "%02d:%02d" % (m, s)
 
 def get_nearest_silence(audio, position, within_seconds=20):
-    analysis_window = 200
+    analysis_window = 100
     slice_size = 1000
     for iteration in range(0, within_seconds):
         for forward in [True, False]:
