@@ -67,17 +67,26 @@ def format_ms_time(duration_ms, with_ms=False):
     else:
         return "%02d:%02d" % (m, s)
 
-def get_nearest_silence(audio, position, window=200):
-    last_position_forward = position + 15000 if position + 15000 < len(audio) else len(audio) - 1
-    last_position_backward = position - 15000 if position - 15000 > 0 else 0
-    for index in range(position, last_position_forward):
-        window_slice = audio[index:index + window]
-        if window_slice.rms == 0:
-            return True, index
-    for index in range(position, last_position_backward):
-        window_slice = audio[index:index + window]
-        if window_slice.rms == 0:
-            return True, index
+def get_nearest_silence(audio, position, within_seconds=20):
+    analysis_window = 200
+    slice_size = 1000
+    for iteration in range(0, within_seconds):
+        for forward in [True, False]:
+            current_pos = position + iteration * (slice_size if forward else slice_size * -1)
+            current_last_pos = current_pos
+            if forward and current_pos + slice_size < len(audio):
+                current_last_pos = current_pos + slice_size
+            elif forward and current_pos + slice_size >= len(audio):
+                current_last_pos = len(audio) - 1
+            elif not forward and current_pos - slice_size >= 0:
+                current_last_pos = current_pos - slice_size
+            elif not forward and current_pos - slice_size < 0:
+                current_last_pos = 0
+            #print "** from %s to %s" % (format_ms_time(current_pos), format_ms_time(current_last_pos))
+            for index in range(current_pos, current_last_pos):
+                window_slice = audio[index:index + analysis_window]
+                if window_slice.rms == 0:
+                    return True, index
     print "ERROR: No silence were found"
     return False, position
 
