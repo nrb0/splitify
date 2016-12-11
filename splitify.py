@@ -44,14 +44,12 @@ def ask_int_input(message):
     user_input = raw_input()
     if user_input == "":
         return 0
-
     try:
         value = int(user_input)
         return value
     except ValueError:
         print "Invalid input"
         return ask_int_input(message)
-
     print "Invalid choice"
     return ask_question(message, possible_answers)
 
@@ -130,13 +128,7 @@ def processTracks(tracks, ripped_file, totalLength, curr_start_pos, playlist_nam
 
         print "----- %s - %s -----" % (track_artist, track_title)
 
-        # if os.path.exists(track_filepath) and ask_question("The file already exists, skip"):
-        #     curr_file = pydub.AudioSegment.from_mp3(track_filepath)
-        #     curr_start_pos += len(curr_file)
-        #     print "Skipping playhead to %s" % format_ms_time(curr_start_pos, True)
-        #     continue
-
-        # Compute track end
+        # Analysis phase to find the end of the track based on silence
         print "* ANALYZING..."
         silence_found, computed_end = get_nearest_silence(ripped_file, curr_start_pos + track_duration_ms)
         computed_duration = computed_end - curr_start_pos
