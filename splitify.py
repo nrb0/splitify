@@ -9,6 +9,8 @@ import spotipy
 import spotipy.util as util
 import urllib
 
+#-------------------------------------------------------------------------------
+
 def ask_question(message, possible_answers=[]):
     yes_no_question = len(possible_answers) == 0
 
@@ -39,6 +41,8 @@ def ask_question(message, possible_answers=[]):
     print "Invalid choice"
     return ask_question(message, possible_answers)
 
+#-------------------------------------------------------------------------------
+
 def ask_int_input(message):
     sys.stdout.write("%s : " % message)
     user_input = raw_input()
@@ -53,9 +57,13 @@ def ask_int_input(message):
     print "Invalid choice"
     return ask_question(message, possible_answers)
 
-def removeIllegalCharacters(name):
+#-------------------------------------------------------------------------------
+
+def remove_illegal_characters(name):
     remove_punctuation_map = dict((ord(char), None) for char in '\/*?:"<>|')
     return name.translate(remove_punctuation_map)
+
+#-------------------------------------------------------------------------------
 
 def format_ms_time(duration_ms, with_ms=False):
     s, ms = divmod(duration_ms, 1000)
@@ -64,6 +72,8 @@ def format_ms_time(duration_ms, with_ms=False):
         return "%02d:%02d:%03d" % (m, s, ms)
     else:
         return "%02d:%02d" % (m, s)
+
+#-------------------------------------------------------------------------------
 
 def get_nearest_silence(audio, position, within_seconds=20):
     analysis_window = 100
@@ -80,13 +90,14 @@ def get_nearest_silence(audio, position, within_seconds=20):
                 current_last_pos = current_pos - slice_size
             elif not forward and current_pos - slice_size < 0:
                 current_last_pos = 0
-            #print "** from %s to %s" % (format_ms_time(current_pos), format_ms_time(current_last_pos))
             for index in range(current_pos, current_last_pos):
                 window_slice = audio[index:index + analysis_window]
                 if window_slice.rms == 0:
                     return True, index
     print "ERROR: No silence were found"
     return False, position
+
+#-------------------------------------------------------------------------------
 
 def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
     full_path = file_name
@@ -98,21 +109,26 @@ def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
         full_path = "(INCOMPLETE) " + file_name
 
     print "* EXPORTING..."
-    print "** from %s to %s ..." % (format_ms_time(start_pos, True), format_ms_time(local_end_position, True))
+    print "** from %s to %s ..." % (format_ms_time(start_pos, True),
+                                    format_ms_time(local_end_position, True))
     audio_slice = ripped_file[start_pos:local_end_position]
     audio_slice.export(full_path, format="mp3")
 
-    if end_of_file or not interactive or interactive and ask_question("Is the export correct"):
+    if (end_of_file or
+       not interactive or
+       interactive and ask_question("Is the export correct")):
         return local_end_position + 1
     else:
         os.remove(full_path)
         start_offset = ask_int_input("Start offset (in ms)")
         end_offset = ask_int_input("End offset (in ms)")
-        return export_slice(ripped_file, start_pos + start_offset, end_pos + end_offset, full_path, interactive)
+        return export_slice(ripped_file, start_pos + start_offset,
+            end_pos + end_offset, full_path, interactive)
 
-def processTracks(tracks, ripped_file, totalLength, curr_start_pos, playlist_name):
+#-------------------------------------------------------------------------------
+
+def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
     for index, item in enumerate(tracks['items']):
-
         # first check if we are not trying to export out of range
         if curr_start_pos == len(ripped_file):
             print "EOF reached, aborting!"
@@ -123,29 +139,38 @@ def processTracks(tracks, ripped_file, totalLength, curr_start_pos, playlist_nam
         track_artist = track['artists'][0]['name']
         track_title = track['name']
         track_picture_url = track['album']['images'][0]['url']
-        track_filepath = " %02d %s - %s.mp3" % (index+1, removeIllegalCharacters(track_artist), removeIllegalCharacters(track_title))
+        track_filepath = " %02d %s - %s.mp3" % (index + 1,
+            remove_illegal_characters(track_artist),
+            remove_illegal_characters(track_title))
         track_duration_ms = track['duration_ms']
 
         print "----- %s - %s -----" % (track_artist, track_title)
 
         # Analysis phase to find the end of the track based on silence
         print "* ANALYZING..."
-        silence_found, computed_end = get_nearest_silence(ripped_file, curr_start_pos + track_duration_ms)
+        silence_found, computed_end = get_nearest_silence(ripped_file,
+            curr_start_pos + track_duration_ms)
         computed_duration = computed_end - curr_start_pos
         if not silence_found:
             print "ERROR: Falling back to manual mode"
-            print "** Original track duration : %s" % format_ms_time(track_duration_ms, True)
+            print "** Original track duration : %s" % (
+                format_ms_time(track_duration_ms, True))
         else:
             duration_delta = computed_duration - track_duration_ms
             more = "" if duration_delta >= 0 else "-"
             duration_delta = math.sqrt(duration_delta * duration_delta)
-            print "** Duration delta : %s%s" % (more, format_ms_time(duration_delta, True))
+            print "** Difference with original duration : %s%s" % (more,
+                format_ms_time(duration_delta, True))
 
         # export and compute the next starting point
         curr_start_pos = export_slice(ripped_file, curr_start_pos, computed_end, track_filepath, not silence_found)
 
         # write metadata
         write_tags(track_filepath, track_artist, track_title, playlist_name, track_picture_url)
+
+    return curr_start_pos
+
+#-------------------------------------------------------------------------------
 
 def write_tags(file_path, artist, title, album, pic_url=""):
     print ("* TAGGING...")
@@ -163,33 +188,41 @@ def write_tags(file_path, artist, title, album, pic_url=""):
         os.remove("pic.jpeg")
     audio_file.tag.save()
 
+#-------------------------------------------------------------------------------
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
-        userName = sys.argv[1]
-        playlistName = sys.argv[2]
-        ripped_filePath = sys.argv[3]
+        username = sys.argv[1]
+        playlist_name = sys.argv[2]
+        ripped_filepath = sys.argv[3]
+        #output_path = sys.argv[4]
     else:
         #print "usage: user_playlists.py [username] [spotifyPlaylistName] [path/to/ripped/mp3]"
         sys.exit()
+
     # Start by getting the ripped file and preparing some data for iterating
-    ripped_file = pydub.AudioSegment.from_mp3(ripped_filePath)
-    totalLength = len(ripped_file)
-    print "Audio file duration is %d:%d" % divmod(totalLength / 1000., 60)
-    currentStartPosition = 0
+    ripped_file = pydub.AudioSegment.from_mp3(ripped_filepath)
+    print "Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60)
+    curr_start_pos = 0
+
     # Init spotify data, exit if it fails
-    token = util.prompt_for_user_token(userName)
+    token = util.prompt_for_user_token(username)
     if not token:
-        print "Can't get token for", userName
+        print "Can't get token for", username
         exit()
     sp = spotipy.Spotify(auth=token)
-    playlists = sp.user_playlists(userName)
+    playlists = sp.user_playlists(username)
     for playlist in playlists['items']:
-        if (playlist['owner']['id'] == userName and
-            playlist['name'] == playlistName):
-            results = sp.user_playlist(userName, playlist['id'],fields="tracks, next")
+        if (playlist['owner']['id'] == username and
+           playlist['name'] == playlist_name):
+            results = sp.user_playlist(username,
+                                       playlist['id'],fields="tracks, next")
             tracks = results['tracks']
-            processTracks(tracks, ripped_file, totalLength, currentStartPosition, playlistName)
+            curr_start_pos = process_tracks(tracks, ripped_file, curr_start_pos,
+                                            playlist_name)
             while tracks['next']:
                 tracks = sp.next(tracks)
-                processTracks(tracks, ripped_file, totalLength, currentStartPosition, playlistName)
+                curr_start_pos = process_tracks(tracks, ripped_file,
+                                               curr_start_pos, playlist_name)
+
+#-------------------------------------------------------------------------------
