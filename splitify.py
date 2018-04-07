@@ -201,7 +201,7 @@ if __name__ == '__main__':
         sys.exit()
 
     # Start by getting the ripped file and preparing some data for iterating
-    ripped_file = pydub.AudioSegment.from_mp3(ripped_filepath)
+    ripped_file = pydub.AudioSegment.from_wav(ripped_filepath)
     print "Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60)
     curr_start_pos = 0
 
