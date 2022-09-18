@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/opt/homebrew/bin/python3
 
 import eyed3
 import math
@@ -7,7 +7,7 @@ import pydub
 import sys
 import spotipy
 import spotipy.util as util
-import urllib
+import urllib.request
 
 #-------------------------------------------------------------------------------
 
@@ -17,10 +17,10 @@ def ask_question(message, possible_answers=[]):
     if yes_no_question:
         sys.stdout.write("%s [Y/n]? " % message)
     else:
-        print "%s : " % message
+        print("%s : " % message)
         answer_index = 1
         for answer in possible_answers:
-            print "%d. %s" % (answer_index, str(answer))
+            print("%d. %s" % (answer_index, str(answer)))
             answer_index += 1
 
     user_input = raw_input()
@@ -37,8 +37,8 @@ def ask_question(message, possible_answers=[]):
             if choice > 0 and choice <= len(possible_answers):
                 return possible_answers[choice - 1]
         except ValueError:
-            print "Something"
-    print "Invalid choice"
+            print("Something")
+    print("Invalid choice")
     return ask_question(message, possible_answers)
 
 #-------------------------------------------------------------------------------
@@ -52,9 +52,9 @@ def ask_int_input(message):
         value = int(user_input)
         return value
     except ValueError:
-        print "Invalid input"
+        print("Invalid input")
         return ask_int_input(message)
-    print "Invalid choice"
+    print("Invalid choice")
     return ask_question(message, possible_answers)
 
 #-------------------------------------------------------------------------------
@@ -94,7 +94,7 @@ def get_nearest_silence(audio, position, within_seconds=20):
                 window_slice = audio[index:index + analysis_window]
                 if window_slice.rms == 0:
                     return True, index
-    print "ERROR: No silence were found"
+    print("ERROR: No silence were found")
     return False, position
 
 #-------------------------------------------------------------------------------
@@ -108,9 +108,9 @@ def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
         local_end_position = len(ripped_file) - 1
         full_path = "(INCOMPLETE) " + file_name
 
-    print "* EXPORTING..."
-    print "** from %s to %s ..." % (format_ms_time(start_pos, True),
-                                    format_ms_time(local_end_position, True))
+    print("* EXPORTING...")
+    print("** from %s to %s ..." % (format_ms_time(start_pos, True),
+                                    format_ms_time(local_end_position, True)))
     audio_slice = ripped_file[start_pos:local_end_position]
     audio_slice.export(full_path, format="mp3")
 
@@ -131,7 +131,7 @@ def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
     for index, item in enumerate(tracks['items']):
         # first check if we are not trying to export out of range
         if curr_start_pos == len(ripped_file):
-            print "EOF reached, aborting!"
+            print("EOF reached, aborting!")
             return
 
         # store track metadata
@@ -139,28 +139,28 @@ def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
         track_artist = track['artists'][0]['name']
         track_title = track['name']
         track_picture_url = track['album']['images'][0]['url']
-        track_filepath = " %02d %s - %s.mp3" % (index + 1,
+        track_filepath = "%02d %s - %s.mp3" % (index + 1,
             remove_illegal_characters(track_artist),
             remove_illegal_characters(track_title))
         track_duration_ms = track['duration_ms']
 
-        print "----- %s - %s -----" % (track_artist, track_title)
+        print("----- %s - %s -----" % (track_artist, track_title))
 
         # Analysis phase to find the end of the track based on silence
-        print "* ANALYZING..."
+        print("* ANALYZING...")
         silence_found, computed_end = get_nearest_silence(ripped_file,
             curr_start_pos + track_duration_ms)
         computed_duration = computed_end - curr_start_pos
         if not silence_found:
-            print "ERROR: Falling back to manual mode"
-            print "** Original track duration : %s" % (
-                format_ms_time(track_duration_ms, True))
+            print("ERROR: Falling back to manual mode")
+            print("** Original track duration : %s" % (
+                format_ms_time(track_duration_ms, True)))
         else:
             duration_delta = computed_duration - track_duration_ms
             more = "" if duration_delta >= 0 else "-"
             duration_delta = math.sqrt(duration_delta * duration_delta)
-            print "** Difference with original duration : %s%s" % (more,
-                format_ms_time(duration_delta, True))
+            print("** Difference with original duration : %s%s" % (more,
+                format_ms_time(duration_delta, True)))
 
         # export and compute the next starting point
         curr_start_pos = export_slice(ripped_file, curr_start_pos, computed_end, track_filepath, not silence_found)
@@ -173,16 +173,16 @@ def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
 #-------------------------------------------------------------------------------
 
 def write_tags(file_path, artist, title, album, pic_url=""):
-    print ("* TAGGING...")
+    print("* TAGGING...")
     audio_file = eyed3.load(file_path)
     if audio_file.tag is None:
         audio_file.initTag()
         audio_file.tag.save()
-    audio_file.tag.artist = unicode(artist)
-    audio_file.tag.title = unicode(title)
-    audio_file.tag.album = unicode(album)
+    audio_file.tag.artist = str(artist)
+    audio_file.tag.title = str(title)
+    audio_file.tag.album = str(album)
     if pic_url != "":
-        urllib.urlretrieve(pic_url, "pic.jpeg")
+        urllib.request.urlretrieve(pic_url, "pic.jpeg")
         pic = open("pic.jpeg", "rb").read()
         audio_file.tag.images.set(3, pic, "image/jpeg", u"cover")
         os.remove("pic.jpeg")
@@ -195,20 +195,19 @@ if __name__ == '__main__':
         username = sys.argv[1]
         playlist_name = sys.argv[2]
         ripped_filepath = sys.argv[3]
-        #output_path = sys.argv[4]
     else:
-        #print "usage: user_playlists.py [username] [spotifyPlaylistName] [path/to/ripped/mp3]"
+        print("usage: user_playlists.py username spotifyPlaylistName path/to/ripped/wav")
         sys.exit()
 
     # Start by getting the ripped file and preparing some data for iterating
     ripped_file = pydub.AudioSegment.from_wav(ripped_filepath)
-    print "Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60)
+    print("Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60))
     curr_start_pos = 0
 
     # Init spotify data, exit if it fails
     token = util.prompt_for_user_token(username)
     if not token:
-        print "Can't get token for", username
+        print("Can't get token for", username)
         exit()
     sp = spotipy.Spotify(auth=token)
     playlists = sp.user_playlists(username)
