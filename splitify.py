@@ -139,7 +139,7 @@ def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
         track_artist = track['artists'][0]['name']
         track_title = track['name']
         track_picture_url = track['album']['images'][0]['url']
-        track_filepath = "%02d %s - %s.mp3" % (index + 1,
+        track_filepath = "%s - %s.mp3" % (
             remove_illegal_characters(track_artist),
             remove_illegal_characters(track_title))
         track_duration_ms = track['duration_ms']
