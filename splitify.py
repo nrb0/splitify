@@ -23,7 +23,7 @@ def ask_question(message, possible_answers=[]):
             print("%d. %s" % (answer_index, str(answer)))
             answer_index += 1
 
-    user_input = raw_input()
+    user_input = input()
 
     if yes_no_question:
         lower_input = user_input.lower()
@@ -45,7 +45,7 @@ def ask_question(message, possible_answers=[]):
 
 def ask_int_input(message):
     sys.stdout.write("%s : " % message)
-    user_input = raw_input()
+    user_input = input()
     if user_input == "":
         return 0
     try:
