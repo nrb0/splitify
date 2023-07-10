@@ -1,5 +1,9 @@
 #!/opt/homebrew/bin/python3
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import NamedTuple
+
 import eyed3
 import math
 import os
@@ -7,7 +11,37 @@ import pydub
 import sys
 import spotipy
 import spotipy.util as util
+import subprocess
 import urllib.request
+
+#-------------------------------------------------------------------------------
+
+@dataclass
+class TrackDescriptor:
+    number: int
+    title: str
+    artist: str
+    album: str
+    coverURL: str
+    filename: str
+    duration: int
+
+#-------------------------------------------------------------------------------
+
+def exportSlice(sourcePath, destinationFilename, startInMs, endInMs):
+    sourceParentPath = sourcePath.parent.absolute()
+    sourceExtension = sourcePath.suffix
+    sourceFileName = sourcePath.stem
+
+    startTime = format_ms_time(startInMs)
+    endTime = format_ms_time(endInMs)
+
+    destinationFormat = os.path.join(sourceParentPath,
+        "{}{}".format(destinationFilename, ".mp3"))
+
+    subprocess.call(["ffmpeg", "-hide_banner", "-v", "quiet", "-stats",
+        "-copyts", "-ss", startTime, "-i", sourcePath, "-to", endTime,
+        "-ab", "320k", destinationFormat])
 
 #-------------------------------------------------------------------------------
 
@@ -65,13 +99,13 @@ def remove_illegal_characters(name):
 
 #-------------------------------------------------------------------------------
 
-def format_ms_time(duration_ms, with_ms=False):
-    s, ms = divmod(duration_ms, 1000)
-    m, s = divmod(s, 60)
-    if with_ms:
-        return "%02d:%02d:%03d" % (m, s, ms)
-    else:
-        return "%02d:%02d" % (m, s)
+def format_ms_time(durationInMs, with_ms=False):
+    seconds, milliseconds = divmod(durationInMs, 1000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    return "{:02d}:{:02d}:{:02d}.{:03d}".format(hours, minutes,
+                                                seconds, milliseconds)
 
 #-------------------------------------------------------------------------------
 
@@ -99,7 +133,7 @@ def get_nearest_silence(audio, position, within_seconds=20):
 
 #-------------------------------------------------------------------------------
 
-def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
+def export_slice(ripped_file, sourceFilePath, start_pos, end_pos, file_name, interactive):
     full_path = file_name
     local_end_position = end_pos
     end_of_file = local_end_position >= len(ripped_file)
@@ -109,10 +143,11 @@ def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
         full_path = "(INCOMPLETE) " + file_name
 
     print("* EXPORTING...")
-    print("** from %s to %s ..." % (format_ms_time(start_pos, True),
-                                    format_ms_time(local_end_position, True)))
+    print("** from %s to %s ..." % (format_ms_time(start_pos),
+                                    format_ms_time(local_end_position)))
     audio_slice = ripped_file[start_pos:local_end_position]
-    audio_slice.export(full_path, format="mp3")
+    # audio_slice.export(full_path, format="mp3")
+    exportSlice(sourceFilePath, file_name, start_pos, local_end_position)
 
     if (end_of_file or
        not interactive or
@@ -127,7 +162,38 @@ def export_slice(ripped_file, start_pos, end_pos, file_name, interactive):
 
 #-------------------------------------------------------------------------------
 
-def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
+def getFormattedArtists(artists):
+    formattedTrackArtist = ""
+    numberOfArtists = len(artists)
+
+    for index, currentArtist in enumerate(artists):
+        formattedTrackArtist = currentArtist['name']
+        isLastArtists = index == numberOfArtists - 1
+
+        if (numberOfArtists > 1) and not isLastArtists:
+            formattedTrackArtist += ", "
+
+    return formattedTrackArtist
+
+#-------------------------------------------------------------------------------
+
+def getTrackDescriptor(track):
+    artist = getFormattedArtists(track['artists'])
+    title = track['name']
+    trackNumber = track['track_number']
+    album = track['album']['name']
+    coverURL = track['album']['images'][0]['url']
+    fileName = "{:02d} {}".format(trackNumber, 
+                                  remove_illegal_characters(title))
+    durationInMs = track['duration_ms']
+
+    return TrackDescriptor( trackNumber, title, artist, album,
+                            coverURL, fileName, durationInMs )
+
+
+#-------------------------------------------------------------------------------
+
+def process_tracks(tracks, ripped_file, sourceFilePath, curr_start_pos, playlist_name):
     for index, item in enumerate(tracks['items']):
         # first check if we are not trying to export out of range
         if curr_start_pos == len(ripped_file):
@@ -136,57 +202,55 @@ def process_tracks(tracks, ripped_file, curr_start_pos, playlist_name):
 
         # store track metadata
         track = item['track']
-        track_artist = track['artists'][0]['name']
-        track_title = track['name']
-        track_picture_url = track['album']['images'][0]['url']
-        track_filepath = "%s - %s.mp3" % (
-            remove_illegal_characters(track_artist),
-            remove_illegal_characters(track_title))
-        track_duration_ms = track['duration_ms']
+        descriptor = getTrackDescriptor(track)
 
-        print("----- %s - %s -----" % (track_artist, track_title))
+        print("----- %s - %s -----" % (descriptor.artist, descriptor.title))
 
         # Analysis phase to find the end of the track based on silence
         print("* ANALYZING...")
         silence_found, computed_end = get_nearest_silence(ripped_file,
-            curr_start_pos + track_duration_ms)
+            curr_start_pos + descriptor.duration)
         computed_duration = computed_end - curr_start_pos
         if not silence_found:
             print("ERROR: Falling back to manual mode")
             print("** Original track duration : %s" % (
-                format_ms_time(track_duration_ms, True)))
+                format_ms_time(descriptor.duration)))
         else:
-            duration_delta = computed_duration - track_duration_ms
+            duration_delta = computed_duration - descriptor.duration
             more = "" if duration_delta >= 0 else "-"
             duration_delta = math.sqrt(duration_delta * duration_delta)
             print("** Difference with original duration : %s%s" % (more,
-                format_ms_time(duration_delta, True)))
+                format_ms_time(duration_delta)))
 
         # export and compute the next starting point
-        curr_start_pos = export_slice(ripped_file, curr_start_pos, computed_end, track_filepath, not silence_found)
+        curr_start_pos = export_slice(ripped_file, sourceFilePath, curr_start_pos, computed_end, descriptor.filename, not silence_found)
 
         # write metadata
-        write_tags(track_filepath, track_artist, track_title, playlist_name, track_picture_url)
+        descriptor.filename += ".mp3"
+        write_tags(descriptor)
 
     return curr_start_pos
 
 #-------------------------------------------------------------------------------
 
-def write_tags(file_path, artist, title, album, pic_url=""):
+def write_tags(descriptor):
     print("* TAGGING...")
-    audio_file = eyed3.load(file_path)
-    if audio_file.tag is None:
-        audio_file.initTag()
-        audio_file.tag.save()
-    audio_file.tag.artist = str(artist)
-    audio_file.tag.title = str(title)
-    audio_file.tag.album = str(album)
-    if pic_url != "":
-        urllib.request.urlretrieve(pic_url, "pic.jpeg")
+    audioFile = eyed3.load(descriptor.filename)
+
+    if audioFile.tag is None:
+        audioFile.initTag()
+
+    audioFile.tag.artist = descriptor.artist
+    audioFile.tag.title = descriptor.title
+    audioFile.tag.album = descriptor.album
+    audioFile.tag.track_num = descriptor.number
+    if descriptor.coverURL != "":
+        urllib.request.urlretrieve(descriptor.coverURL, "pic.jpeg")
         pic = open("pic.jpeg", "rb").read()
-        audio_file.tag.images.set(3, pic, "image/jpeg", u"cover")
+        audioFile.tag.images.set(3, pic, "image/jpeg", u"cover")
         os.remove("pic.jpeg")
-    audio_file.tag.save()
+
+    audioFile.tag.save()
 
 #-------------------------------------------------------------------------------
 
@@ -201,6 +265,7 @@ if __name__ == '__main__':
 
     # Start by getting the ripped file and preparing some data for iterating
     ripped_file = pydub.AudioSegment.from_wav(ripped_filepath)
+    sourceFilePath = Path(ripped_filepath)
     print("Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60))
     curr_start_pos = 0
 
@@ -217,11 +282,11 @@ if __name__ == '__main__':
             results = sp.user_playlist(username,
                                        playlist['id'],fields="tracks, next")
             tracks = results['tracks']
-            curr_start_pos = process_tracks(tracks, ripped_file, curr_start_pos,
+            curr_start_pos = process_tracks(tracks, ripped_file, sourceFilePath, curr_start_pos,
                                             playlist_name)
             while tracks['next']:
                 tracks = sp.next(tracks)
-                curr_start_pos = process_tracks(tracks, ripped_file,
+                curr_start_pos = process_tracks(tracks, ripped_file, sourceFilePath, 
                                                curr_start_pos, playlist_name)
 
 #-------------------------------------------------------------------------------
