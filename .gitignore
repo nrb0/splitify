@@ -1,3 +1,6 @@
 .cache-*
 .DS_Store
+.venv/*
 *.mp3
+*.wav
+Pipfile
