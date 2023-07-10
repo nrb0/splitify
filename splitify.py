@@ -28,13 +28,16 @@ class TrackDescriptor:
     endTime: int = 0
     parentPath: Path = Path()
 
-tracksToExport = []
+@dataclass
+class AudioFile:
+    segment: pydub.AudioSegment
+    path: Path
 
 #-------------------------------------------------------------------------------
 
 def exportSlice(sourcePath, destinationPath, startInMs, endInMs):
-    startTime = format_ms_time(startInMs)
-    endTime = format_ms_time(endInMs)
+    startTime = formatTime(startInMs)
+    endTime = formatTime(endInMs)
 
     subprocess.call(["ffmpeg", "-hide_banner", "-v", "quiet", "-stats",
         "-copyts", "-ss", startTime, "-i", sourcePath, "-to", endTime,
@@ -72,7 +75,7 @@ def ask_question(message, possible_answers=[]):
         try:
             choice = int(user_input)
             if choice > 0 and choice <= len(possible_answers):
-                return possible_answers[choice - 1]
+                return choice - 1
         except ValueError:
             print("Something")
     print("Invalid choice")
@@ -80,7 +83,7 @@ def ask_question(message, possible_answers=[]):
 
 #-------------------------------------------------------------------------------
 
-def ask_int_input(message):
+def askIntInput(message):
     sys.stdout.write("%s : " % message)
     user_input = input()
     if user_input == "":
@@ -90,19 +93,75 @@ def ask_int_input(message):
         return value
     except ValueError:
         print("Invalid input")
-        return ask_int_input(message)
+        return askIntInput(message)
     print("Invalid choice")
-    return ask_question(message, possible_answers)
+    return askIntInput(message)
 
 #-------------------------------------------------------------------------------
 
-def remove_illegal_characters(name):
+def parseSeconds(inputString):
+    seconds = 0
+    milliseconds = 0
+    parts = inputString.split(".")
+
+    if len(parts) == 2:
+        seconds = int(parts[0])
+        milliseconds = int(parts[1])
+    elif len(parts) == 1:
+        seconds = int(parts[0])
+    else:
+        raise ValueError("")
+
+    return seconds, milliseconds
+
+#-------------------------------------------------------------------------------
+
+def parseTimestamp(inputString):
+    hours = 0
+    minutes = 0
+    seconds = 0
+    milliseconds = 0
+
+    parts = inputString.split(":")
+    if len(parts) == 3:
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds, milliseconds = parseSeconds(parts[2])
+    elif len(parts) == 2:
+        minutes = int(parts[0])
+        seconds, milliseconds = parseSeconds(parts[1])
+    elif len(parts) == 1:
+        seconds, milliseconds = parseSeconds(parts[0])
+    else:
+        raise ValueError("")
+
+    return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds
+
+#-------------------------------------------------------------------------------
+
+def askTimestampInput(message):
+    print("{} : ".format(message))
+    user_input = input()
+    if user_input == "":
+        return 0
+    try:
+        value = parseTimestamp(user_input)
+        return value
+    except ValueError:
+        print("Invalid input")
+        return askTimestampInput(message)
+    print("Invalid choice")
+    return askTimestampInput(message, possible_answers)
+
+#-------------------------------------------------------------------------------
+
+def sanitizeString(name):
     remove_punctuation_map = dict((ord(char), None) for char in '\/*?:"<>|')
     return name.translate(remove_punctuation_map)
 
 #-------------------------------------------------------------------------------
 
-def format_ms_time(durationInMs, with_ms=False):
+def formatTime(durationInMs, with_ms=False):
     seconds, milliseconds = divmod(durationInMs, 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
@@ -137,42 +196,6 @@ def getNearestSilence(audioSegment, position, within_seconds=20):
 
 #-------------------------------------------------------------------------------
 
-def export_slice(audioSegment, sourcePath, descriptor, interactive):
-    sourceExtension = sourcePath.suffix
-    destinationPath = os.path.join(descriptor.parentPath,
-        "{}{}".format(descriptor.filename, sourceExtension))
-
-    totalAudioLength = len(audioSegment)
-    isEndOfFile = descriptor.endTime >= totalAudioLength
-
-    startTime = descriptor.startTime
-    currentEndTime = totalAudioLength - 1 if isEndOfFile else descriptor.endTime
-
-    print("* EXPORTING...")
-    print("** from {} to {} ...".format(format_ms_time(startTime),
-                                        format_ms_time(currentEndTime)))
-    if isEndOfFile:
-        print("** WARNING: End of file reached, file might be incomplete")
-
-    exportSlice(sourcePath, destinationPath, startTime, currentEndTime)
-
-    if (isEndOfFile or not interactive or interactive and ask_question("Is the export correct")):
-        os.remove(destinationPath)
-
-        descriptor.endTime = currentEndTime
-        return descriptor
-    else:
-        os.remove(destinationPath)
-
-        startOffset = ask_int_input("Start offset (in ms)")
-        endOffset = ask_int_input("End offset (in ms)")
-        descriptor.startTime += startOffset
-        descriptor.endTime += endOffset
-
-        return export_slice(audioSegment, sourcePath, descriptor, interactive)
-
-#-------------------------------------------------------------------------------
-
 def getFormattedArtists(artists):
     formattedTrackArtist = ""
     numberOfArtists = len(artists)
@@ -188,65 +211,66 @@ def getFormattedArtists(artists):
 
 #-------------------------------------------------------------------------------
 
-def createAndAppendDescriptor(tracks, audioSegment, sourcePath, currentStartTime):
-    sourceParentPath = sourcePath.parent.absolute()
-    sourceExtension = sourcePath.suffix
+def createTrackDescriptors(tracks, audioFile):
+    descriptors = []
+
+    sourceParentPath = audioFile.path.parent.absolute()
+    sourceExtension = audioFile.path.suffix
+    totalAudioLength = len(audioFile.segment)
+    print("Audio file duration is {}".format(formatTime(totalAudioLength)))
+
+    currentStartTime = 0
 
     for index, item in enumerate(tracks['items']):
-        # first check if we are not trying to export out of range
-        if currentStartTime == len(audioSegment):
-            print("EOF reached, aborting!")
-            return
+        if currentStartTime >= totalAudioLength:
+            print("End of file reached, aborting!")
+            return descriptors
 
-        # store track metadata
         track = item['track']
-
         descriptor = TrackDescriptor()
+
+        # Store basic metadata
         descriptor.artist = getFormattedArtists(track['artists'])
         descriptor.title = track['name']
         descriptor.number = track['track_number']
         descriptor.album = track['album']['name']
         descriptor.coverURL = track['album']['images'][0]['url']
-        descriptor.filename = "{:02d} {}".format(descriptor.number, 
-                                                 remove_illegal_characters(descriptor.title))
+        descriptor.filename = "{:02d} {}".format(descriptor.number,
+                                                 sanitizeString(descriptor.title))
         descriptor.parentPath = sourceParentPath
+        
         descriptor.startTime = currentStartTime
-
-        durationInMs = track['duration_ms']
-
-        print("----- %s - %s -----" % (descriptor.artist, descriptor.title))
+        duration = track['duration_ms']
+        descriptor.endTime = descriptor.startTime + duration
 
         # Analysis phase to find the end of the track based on silence
-        print("* ANALYZING...")
-        hasFoundSilence, concreteEnd = getNearestSilence(audioSegment,
-                                            currentStartTime + durationInMs)
-        descriptor.endTime = concreteEnd
+        print("* ANALYZING {} - {}...".format(descriptor.artist, descriptor.title))
+        hasFoundSilence, descriptor.endTime = getNearestSilence(audioFile.segment,
+                                                                descriptor.endTime)
 
-        if not hasFoundSilence:
-            print("ERROR: Falling back to manual mode")
-            print("** Original track duration : {}".format(format_ms_time(durationInMs)))
-        else:
-            durationDelta = concreteEnd - descriptor.startTime - durationInMs
+        if hasFoundSilence:
+            durationDelta = descriptor.endTime - descriptor.startTime - duration
             formattedDurationDelta = "{}{}".format("" if durationDelta >= 0 else "-",
-                                                   format_ms_time(abs(durationDelta)))
+                                                   formatTime(abs(durationDelta)))
             print("** Difference with original duration : {}".format(formattedDurationDelta))
+        else:
+            print("ERROR: Falling back to manual mode")
+            print("** Original track duration : {}".format(formatTime(duration)))
 
         # export and compute the next starting point
-        descriptor = export_slice(ripped_file, sourcePath, descriptor, not hasFoundSilence)
+        if hasFoundSilence:
+            exportSlice(sourcePath, destinationPath, descriptor.startTime, descriptor.endTime)
+        else:
+            descriptor = editTrackTimesInteractive(audioFile, descriptor)
+
         currentStartTime = descriptor.endTime + 1
+        descriptors.append(descriptor)
 
-        tracksToExport.append(descriptor)
-
-    return currentStartTime
-
-#-------------------------------------------------------------------------------
-
-def appendToExportTask(descriptor):
-    print("Hello")
+    return descriptors
 
 #-------------------------------------------------------------------------------
 
-def write_tags(filePath, descriptor):
+def writeTags(filePath, descriptor):
     print("* TAGGING: {}".format(descriptor.title))
     audioFile = eyed3.load(filePath)
 
@@ -268,53 +292,149 @@ def write_tags(filePath, descriptor):
 
 #-------------------------------------------------------------------------------
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        username = sys.argv[1]
-        playlist_name = sys.argv[2]
-        ripped_filepath = sys.argv[3]
-    else:
-        print("usage: user_playlists.py username spotifyPlaylistName path/to/ripped/wav")
-        sys.exit()
+def convertAndTag(sourcePath, descriptors):
+    sourceExtension = sourcePath.suffix
 
-    # Start by getting the ripped file and preparing some data for iterating
-    ripped_file = pydub.AudioSegment.from_wav(ripped_filepath)
-    sourcePath = Path(ripped_filepath)
-    print("Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60))
-    curr_start_pos = 0
-
-    # Init spotify data, exit if it fails
-    token = util.prompt_for_user_token(username)
-    if not token:
-        print("Can't get token for", username)
-        exit()
-    sp = spotipy.Spotify(auth=token)
-    playlists = sp.user_playlists(username)
-    for playlist in playlists['items']:
-        if (playlist['owner']['id'] == username and
-           playlist['name'] == playlist_name):
-            results = sp.user_playlist(username,
-                                       playlist['id'],fields="tracks, next")
-            tracks = results['tracks']
-            curr_start_pos = createAndAppendDescriptor(tracks, ripped_file,
-                sourcePath, curr_start_pos)
-            while tracks['next']:
-                tracks = sp.next(tracks)
-                curr_start_pos = createAndAppendDescriptor(tracks, ripped_file,
-                    sourcePath, curr_start_pos)
-
-    for descriptor in tracksToExport:
-        sourceExtension = sourcePath.suffix
+    for descriptor in descriptors:
+        print("* CONVERTING {} - {}...".format(descriptor.artist, descriptor.title))
         tempPath = os.path.join(descriptor.parentPath,
             "{}{}".format(descriptor.filename, sourceExtension))
-        print("sourcePath: {}\ntempPath: {}".format(sourcePath, tempPath))
+
         exportSlice(sourcePath, tempPath, descriptor.startTime, descriptor.endTime)
 
         convertedFilePath = os.path.join(descriptor.parentPath,
             "{}{}".format(descriptor.filename, ".mp3"))
+
         convertToMP3(tempPath, convertedFilePath)
         os.remove(tempPath)
 
-        write_tags(convertedFilePath, descriptor)
+        writeTags(convertedFilePath, descriptor)
+
+#-------------------------------------------------------------------------------
+
+def getTracksFromSpotifyPlaylist(spotifyAccess, username, playlistName):
+    playlists = spotifyAccess.user_playlists(username)
+
+    for playlist in playlists['items']:
+        nameMatch = playlist['owner']['id'] == username
+        playlistMatch = playlist['name'] == playlistName
+        if (nameMatch and playlistMatch):
+            results =  spotifyAccess.user_playlist(username,
+                playlist['id'],fields="tracks, next")
+            return results['tracks']
+
+    return None
+
+#-------------------------------------------------------------------------------
+
+def editTrackTimesInteractive(audioFile, descriptor):
+    sourceExtension = audioFile.path.suffix
+    destinationPath = os.path.join(descriptor.parentPath,
+        "{}{}".format(descriptor.filename, sourceExtension))
+
+    totalAudioLength = len(audioFile.segment)
+    isTrackEndBeyondEndOfFile = descriptor.endTime >= totalAudioLength
+
+    startTime = descriptor.startTime
+    endTime = totalAudioLength - 1 if isTrackEndBeyondEndOfFile else descriptor.endTime
+
+    print("* EXPORTING {} - {}...".format(descriptor.artist, descriptor.title))
+    print("** from {} to {} ...".format(formatTime(startTime),
+                                        formatTime(endTime)))
+    if isTrackEndBeyondEndOfFile:
+        print("** WARNING: End of file reached, file might be incomplete")
+
+    exportSlice(sourcePath, destinationPath, startTime, endTime)
+    isExportOk = ask_question("Is the export correct")
+
+    if (not isExportOk):
+        shouldChangeStart = ask_question("Change start time?")
+        if shouldChangeStart:
+            choice = ask_question("How to edit?",
+                                  ["Provide start timestamp",
+                                   "Provide offset for the current start time"])
+            if choice == 0:
+                startTime = askTimestampInput("Enter start timestamp [HH:MM:SS.MS]")
+            else:
+                startTime += askIntInput("Enter start offset (in ms)")
+
+        shouldChangeEnd = ask_question("Change end time?")
+        if shouldChangeEnd:
+            choice = ask_question("How to edit?",
+                                  ["Provide end timestamp",
+                                   "Provide offset for the current end time"])
+            if choice == 0:
+                endTime = askTimestampInput("Enter end timestamp [HH:MM:SS.MS]")
+            else:
+                endTime += askIntInput("Enter end offset (in ms)")
+
+    os.remove(destinationPath)
+    descriptor.startTime = 0 if startTime < 0 else startTime
+    descriptor.endTime = totalAudioLength if endTime >= totalAudioLength else endTime
+
+    if isExportOk:
+        return descriptor
+    else:
+        return editTrackTimesInteractive(audioFile, descriptor)
+
+#-------------------------------------------------------------------------------
+
+def editMenuOverview(audioFile, descriptors):
+    for index, descriptor in enumerate(descriptors):
+        print("{}. {} - {}".format(index + 1, descriptor.artist, descriptor.title))
+
+    shouldEdit = ask_question("Edit any track?")
+
+    while shouldEdit:
+        index = askIntInput("Which track?")
+
+        if index > 0 and index <= len(descriptors):
+            newDescriptor = editTrackTimesInteractive(audioFile, descriptors[index - 1])
+            descriptor[index - 1] = newDescriptor
+        else:
+            print("Invalid index!")
+
+        shouldEdit = ask_question("Edit another track?")
+
+    return descriptors
+
+#-------------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    if len(sys.argv) != 4:
+        print("usage: splitify.py username spotifyPlaylistName path/to/ripped/wav")
+        sys.exit()
+
+    user = sys.argv[1]
+    playlist = sys.argv[2]
+    sourcePath = Path(sys.argv[3])
+
+    if not sourcePath.exists() or not os.path.isfile(sourcePath):
+        print("Invalid path to file")
+        sys.exit()
+
+    # Get playlist from spotify
+    token = util.prompt_for_user_token(user)
+    if not token:
+        print("Can't get token for", user)
+        exit()
+
+    spotifyAccess = spotipy.Spotify(auth=token)
+    tracks = getTracksFromSpotifyPlaylist(spotifyAccess, user, playlist)
+    if tracks == None:
+        print("Can't find playlist \"{}\" in user \"{}\"".format(playlist, user))
+        exit()
+
+    # Process audio file
+    audioFile = AudioFile(pydub.AudioSegment.from_wav(sourcePath), sourcePath)
+    descriptors = createTrackDescriptors(tracks, audioFile)
+
+    # Edit results
+    descriptors = editMenuOverview(audioFile, descriptors)
+
+    # Convert results
+    convertAndTag(sourcePath, descriptors)
+
+    print("k thx bye")
 
 #-------------------------------------------------------------------------------
