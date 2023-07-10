@@ -1,4 +1,4 @@
-#!/opt/homebrew/bin/python3
+#!/usr/bin/env python
 
 from dataclasses import dataclass
 from pathlib import Path
