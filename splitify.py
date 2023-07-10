@@ -18,30 +18,33 @@ import urllib.request
 
 @dataclass
 class TrackDescriptor:
-    number: int
-    title: str
-    artist: str
-    album: str
-    coverURL: str
-    filename: str
-    duration: int
+    number: int = 0
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    coverURL: str = ""
+    filename: str = ""
+    startTime: int = 0
+    endTime: int = 0
+    parentPath: Path = Path()
+
+tracksToExport = []
 
 #-------------------------------------------------------------------------------
 
-def exportSlice(sourcePath, destinationFilename, startInMs, endInMs):
-    sourceParentPath = sourcePath.parent.absolute()
-    sourceExtension = sourcePath.suffix
-    sourceFileName = sourcePath.stem
-
+def exportSlice(sourcePath, destinationPath, startInMs, endInMs):
     startTime = format_ms_time(startInMs)
     endTime = format_ms_time(endInMs)
 
-    destinationFormat = os.path.join(sourceParentPath,
-        "{}{}".format(destinationFilename, ".mp3"))
-
     subprocess.call(["ffmpeg", "-hide_banner", "-v", "quiet", "-stats",
         "-copyts", "-ss", startTime, "-i", sourcePath, "-to", endTime,
-        "-ab", "320k", destinationFormat])
+        "-c", "copy", destinationPath])
+
+#-------------------------------------------------------------------------------
+
+def convertToMP3(sourcePath, destinationPath):
+    subprocess.call(["ffmpeg", "-hide_banner", "-v", "quiet", "-stats",
+        "-i", sourcePath, "-ab", "320k", destinationPath])
 
 #-------------------------------------------------------------------------------
 
@@ -109,23 +112,24 @@ def format_ms_time(durationInMs, with_ms=False):
 
 #-------------------------------------------------------------------------------
 
-def get_nearest_silence(audio, position, within_seconds=20):
-    analysis_window = 100
-    slice_size = 1000
+def getNearestSilence(audioSegment, position, within_seconds=20):
+    analysisWindow = 100
+    sliceSize = 1000
+
     for iteration in range(0, within_seconds):
         for forward in [True, False]:
-            current_pos = position + iteration * (slice_size if forward else slice_size * -1)
+            current_pos = position + iteration * (sliceSize if forward else sliceSize * -1)
             current_last_pos = current_pos
-            if forward and current_pos + slice_size < len(audio):
-                current_last_pos = current_pos + slice_size
-            elif forward and current_pos + slice_size >= len(audio):
-                current_last_pos = len(audio) - 1
-            elif not forward and current_pos - slice_size >= 0:
-                current_last_pos = current_pos - slice_size
-            elif not forward and current_pos - slice_size < 0:
+            if forward and current_pos + sliceSize < len(audioSegment):
+                current_last_pos = current_pos + sliceSize
+            elif forward and current_pos + sliceSize >= len(audioSegment):
+                current_last_pos = len(audioSegment) - 1
+            elif not forward and current_pos - sliceSize >= 0:
+                current_last_pos = current_pos - sliceSize
+            elif not forward and current_pos - sliceSize < 0:
                 current_last_pos = 0
             for index in range(current_pos, current_last_pos):
-                window_slice = audio[index:index + analysis_window]
+                window_slice = audioSegment[index:index + analysisWindow]
                 if window_slice.rms == 0:
                     return True, index
     print("ERROR: No silence were found")
@@ -133,32 +137,39 @@ def get_nearest_silence(audio, position, within_seconds=20):
 
 #-------------------------------------------------------------------------------
 
-def export_slice(ripped_file, sourceFilePath, start_pos, end_pos, file_name, interactive):
-    full_path = file_name
-    local_end_position = end_pos
-    end_of_file = local_end_position >= len(ripped_file)
+def export_slice(audioSegment, sourcePath, descriptor, interactive):
+    sourceExtension = sourcePath.suffix
+    destinationPath = os.path.join(descriptor.parentPath,
+        "{}{}".format(descriptor.filename, sourceExtension))
 
-    if end_of_file:
-        local_end_position = len(ripped_file) - 1
-        full_path = "(INCOMPLETE) " + file_name
+    totalAudioLength = len(audioSegment)
+    isEndOfFile = descriptor.endTime >= totalAudioLength
+
+    startTime = descriptor.startTime
+    currentEndTime = totalAudioLength - 1 if isEndOfFile else descriptor.endTime
 
     print("* EXPORTING...")
-    print("** from %s to %s ..." % (format_ms_time(start_pos),
-                                    format_ms_time(local_end_position)))
-    audio_slice = ripped_file[start_pos:local_end_position]
-    # audio_slice.export(full_path, format="mp3")
-    exportSlice(sourceFilePath, file_name, start_pos, local_end_position)
+    print("** from {} to {} ...".format(format_ms_time(startTime),
+                                        format_ms_time(currentEndTime)))
+    if isEndOfFile:
+        print("** WARNING: End of file reached, file might be incomplete")
 
-    if (end_of_file or
-       not interactive or
-       interactive and ask_question("Is the export correct")):
-        return local_end_position + 1
+    exportSlice(sourcePath, destinationPath, startTime, currentEndTime)
+
+    if (isEndOfFile or not interactive or interactive and ask_question("Is the export correct")):
+        os.remove(destinationPath)
+
+        descriptor.endTime = currentEndTime
+        return descriptor
     else:
-        os.remove(full_path)
-        start_offset = ask_int_input("Start offset (in ms)")
-        end_offset = ask_int_input("End offset (in ms)")
-        return export_slice(ripped_file, start_pos + start_offset,
-            end_pos + end_offset, full_path, interactive)
+        os.remove(destinationPath)
+
+        startOffset = ask_int_input("Start offset (in ms)")
+        endOffset = ask_int_input("End offset (in ms)")
+        descriptor.startTime += startOffset
+        descriptor.endTime += endOffset
+
+        return export_slice(audioSegment, sourcePath, descriptor, interactive)
 
 #-------------------------------------------------------------------------------
 
@@ -177,65 +188,67 @@ def getFormattedArtists(artists):
 
 #-------------------------------------------------------------------------------
 
-def getTrackDescriptor(track):
-    artist = getFormattedArtists(track['artists'])
-    title = track['name']
-    trackNumber = track['track_number']
-    album = track['album']['name']
-    coverURL = track['album']['images'][0]['url']
-    fileName = "{:02d} {}".format(trackNumber, 
-                                  remove_illegal_characters(title))
-    durationInMs = track['duration_ms']
+def createAndAppendDescriptor(tracks, audioSegment, sourcePath, currentStartTime):
+    sourceParentPath = sourcePath.parent.absolute()
+    sourceExtension = sourcePath.suffix
 
-    return TrackDescriptor( trackNumber, title, artist, album,
-                            coverURL, fileName, durationInMs )
-
-
-#-------------------------------------------------------------------------------
-
-def process_tracks(tracks, ripped_file, sourceFilePath, curr_start_pos, playlist_name):
     for index, item in enumerate(tracks['items']):
         # first check if we are not trying to export out of range
-        if curr_start_pos == len(ripped_file):
+        if currentStartTime == len(audioSegment):
             print("EOF reached, aborting!")
             return
 
         # store track metadata
         track = item['track']
-        descriptor = getTrackDescriptor(track)
+
+        descriptor = TrackDescriptor()
+        descriptor.artist = getFormattedArtists(track['artists'])
+        descriptor.title = track['name']
+        descriptor.number = track['track_number']
+        descriptor.album = track['album']['name']
+        descriptor.coverURL = track['album']['images'][0]['url']
+        descriptor.filename = "{:02d} {}".format(descriptor.number, 
+                                                 remove_illegal_characters(descriptor.title))
+        descriptor.parentPath = sourceParentPath
+        descriptor.startTime = currentStartTime
+
+        durationInMs = track['duration_ms']
 
         print("----- %s - %s -----" % (descriptor.artist, descriptor.title))
 
         # Analysis phase to find the end of the track based on silence
         print("* ANALYZING...")
-        silence_found, computed_end = get_nearest_silence(ripped_file,
-            curr_start_pos + descriptor.duration)
-        computed_duration = computed_end - curr_start_pos
-        if not silence_found:
+        hasFoundSilence, concreteEnd = getNearestSilence(audioSegment,
+                                            currentStartTime + durationInMs)
+        descriptor.endTime = concreteEnd
+
+        if not hasFoundSilence:
             print("ERROR: Falling back to manual mode")
-            print("** Original track duration : %s" % (
-                format_ms_time(descriptor.duration)))
+            print("** Original track duration : {}".format(format_ms_time(durationInMs)))
         else:
-            duration_delta = computed_duration - descriptor.duration
-            more = "" if duration_delta >= 0 else "-"
-            duration_delta = math.sqrt(duration_delta * duration_delta)
-            print("** Difference with original duration : %s%s" % (more,
-                format_ms_time(duration_delta)))
+            durationDelta = concreteEnd - descriptor.startTime - durationInMs
+            formattedDurationDelta = "{}{}".format("" if durationDelta >= 0 else "-",
+                                                   format_ms_time(abs(durationDelta)))
+            print("** Difference with original duration : {}".format(formattedDurationDelta))
 
         # export and compute the next starting point
-        curr_start_pos = export_slice(ripped_file, sourceFilePath, curr_start_pos, computed_end, descriptor.filename, not silence_found)
+        descriptor = export_slice(ripped_file, sourcePath, descriptor, not hasFoundSilence)
+        currentStartTime = descriptor.endTime + 1
 
-        # write metadata
-        descriptor.filename += ".mp3"
-        write_tags(descriptor)
+        tracksToExport.append(descriptor)
 
-    return curr_start_pos
+    return currentStartTime
 
 #-------------------------------------------------------------------------------
 
-def write_tags(descriptor):
-    print("* TAGGING...")
-    audioFile = eyed3.load(descriptor.filename)
+def appendToExportTask(descriptor):
+    print("Hello")
+
+#-------------------------------------------------------------------------------
+
+def write_tags(filePath, descriptor):
+    print("* TAGGING: {}".format(descriptor.title))
+    audioFile = eyed3.load(filePath)
 
     if audioFile.tag is None:
         audioFile.initTag()
@@ -244,6 +257,7 @@ def write_tags(descriptor):
     audioFile.tag.title = descriptor.title
     audioFile.tag.album = descriptor.album
     audioFile.tag.track_num = descriptor.number
+
     if descriptor.coverURL != "":
         urllib.request.urlretrieve(descriptor.coverURL, "pic.jpeg")
         pic = open("pic.jpeg", "rb").read()
@@ -265,7 +279,7 @@ if __name__ == '__main__':
 
     # Start by getting the ripped file and preparing some data for iterating
     ripped_file = pydub.AudioSegment.from_wav(ripped_filepath)
-    sourceFilePath = Path(ripped_filepath)
+    sourcePath = Path(ripped_filepath)
     print("Audio file duration is %d:%d" % divmod(len(ripped_file) / 1000., 60))
     curr_start_pos = 0
 
@@ -282,11 +296,25 @@ if __name__ == '__main__':
             results = sp.user_playlist(username,
                                        playlist['id'],fields="tracks, next")
             tracks = results['tracks']
-            curr_start_pos = process_tracks(tracks, ripped_file, sourceFilePath, curr_start_pos,
-                                            playlist_name)
+            curr_start_pos = createAndAppendDescriptor(tracks, ripped_file,
+                sourcePath, curr_start_pos)
             while tracks['next']:
                 tracks = sp.next(tracks)
-                curr_start_pos = process_tracks(tracks, ripped_file, sourceFilePath, 
-                                               curr_start_pos, playlist_name)
+                curr_start_pos = createAndAppendDescriptor(tracks, ripped_file,
+                    sourcePath, curr_start_pos)
+
+    for descriptor in tracksToExport:
+        sourceExtension = sourcePath.suffix
+        tempPath = os.path.join(descriptor.parentPath,
+            "{}{}".format(descriptor.filename, sourceExtension))
+        print("sourcePath: {}\ntempPath: {}".format(sourcePath, tempPath))
+        exportSlice(sourcePath, tempPath, descriptor.startTime, descriptor.endTime)
+
+        convertedFilePath = os.path.join(descriptor.parentPath,
+            "{}{}".format(descriptor.filename, ".mp3"))
+        convertToMP3(tempPath, convertedFilePath)
+        os.remove(tempPath)
+
+        write_tags(convertedFilePath, descriptor)
 
 #-------------------------------------------------------------------------------
