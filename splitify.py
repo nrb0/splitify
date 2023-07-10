@@ -258,9 +258,7 @@ def createTrackDescriptors(tracks, audioFile):
             print("** Original track duration : {}".format(formatTime(duration)))
 
         # export and compute the next starting point
-        if hasFoundSilence:
-            exportSlice(sourcePath, destinationPath, descriptor.startTime, descriptor.endTime)
-        else:
+        if not hasFoundSilence:
             descriptor = editTrackTimesInteractive(audioFile, descriptor)
 
         currentStartTime = descriptor.endTime + 1
