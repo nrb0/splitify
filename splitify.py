@@ -77,7 +77,7 @@ def ask_question(message, possible_answers=[]):
             if choice > 0 and choice <= len(possible_answers):
                 return choice - 1
         except ValueError:
-            print("Something")
+            pass
     print("Invalid choice")
     return ask_question(message, possible_answers)
 
@@ -94,8 +94,6 @@ def askIntInput(message):
     except ValueError:
         print("Invalid input")
         return askIntInput(message)
-    print("Invalid choice")
-    return askIntInput(message)
 
 #-------------------------------------------------------------------------------
 
@@ -135,7 +133,7 @@ def parseTimestamp(inputString):
     else:
         raise ValueError("")
 
-    return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds
+    return hours, minutes, seconds, milliseconds
 
 #-------------------------------------------------------------------------------
 
@@ -145,13 +143,11 @@ def askTimestampInput(message):
     if user_input == "":
         return 0
     try:
-        value = parseTimestamp(user_input)
-        return value
+        hours, minutes, seconds, milliseconds = parseTimestamp(user_input)
+        return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds
     except ValueError:
         print("Invalid input")
         return askTimestampInput(message)
-    print("Invalid choice")
-    return askTimestampInput(message, possible_answers)
 
 #-------------------------------------------------------------------------------
 
@@ -166,8 +162,12 @@ def formatTime(durationInMs, with_ms=False):
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
 
-    return "{:02d}:{:02d}:{:02d}.{:03d}".format(hours, minutes,
-                                                seconds, milliseconds)
+    outputString = "{:02d}:{:02d}.{:03d}".format(minutes, seconds, milliseconds)
+
+    if (hours != 0):
+        outputString = "{:02d}:{}".format(hours, outputString)
+
+    return outputString
 
 #-------------------------------------------------------------------------------
 
