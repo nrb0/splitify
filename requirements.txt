@@ -1,0 +1,3 @@
+eyed3
+pydub
+spotipy
